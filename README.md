@@ -84,16 +84,86 @@ Dans une architecture multi-couches (N-tiers), on identifie généralement une c
 > À part pour des applications très simples, la démarcation transactionnelle au niveau de la couche d’accès aux données est systématiquement une mauvaise idée. Si vous utilisez Spring Data JPA, vous devriez désactiver la prise en charge automatique des transactions par les repositories avec l’annotation ``@EnableJpaRepositories``
 >
 > 
-```java
-@SpringBootApplication
-@EnableJpaRepositories(enableDefaultTransactions = false)
-public class MyApplication {
-
-  public static void main(String[] args) {
-    SpringApplication.run(MyApplication.class, args);
-  }
-
-}
-```
+>```java
+>@SpringBootApplication
+>@EnableJpaRepositories(enableDefaultTransactions = false)
+>public class MyApplication {
+>
+>  public static void main(String[] args) {
+>    SpringApplication.run(MyApplication.class, args);
+>  }
+>
+>}
+>```
 >
 > Une fois cette option désactivée, cela signifie qu’un appel à une méthode de repository qui effectue une modification sur la base de données devra être appelée dans le cadre d’une transaction ou sinon l’appel échouera.
+
+
+## L’annotation @Transactional
+
+Avec Spring Transaction, la démarcation transactionnelle est marquée par l’annotation ``@Transactional`` que l’on ajoute sur des méthodes.
+
+> [!NOTICE]
+> Il existe deux annotations ``@Transactional`` : celle fournie par le Spring Framework (``org.springframework.transaction.annotation.Transactional``) et celle fournie par JTA (``javax.transaction.Transactional``). Le Spring Framework est capable d’utiliser les deux. Elles permettent de configurer les transactions de la même manière mais leurs attributs diffèrent légèrement. Dans cette section, nous présenterons l’annotation ``@Transactional`` fournie par le Spring Framework.
+
+```java
+@Service
+public class UserService {
+
+  @Transactional(readOnly = true)
+  public User getUser() {
+    // ...
+  }
+
+  @Transactional
+  public void saveUser(User user) {
+    // ...
+  }
+}
+```
+
+L’annotation ``@Transactional`` supporte des propriétés afin de pouvoir configurer le support de transaction. Ainsi, l’attribut ``readOnly`` permet d’indiquer si la transaction est en lecture seule (``false`` par défaut).
+
+
+> [!NOTICE]
+> Pour les interactions avec les bases de données, les transactions en lecture seule signifient que l’on n’effectue que des requêtes pour lire des données.
+>
+> Une transaction en lecture seule est sensée être plus facile à gérer pour un moteur transactionnel et lui permettre d’effectuer des optimisations. Dans la pratique, si votre application se base sur le moteur transactionnel de votre SGBDR, il y a des chances pour que ce moteur ne fasse aucune différence entre une transaction et une transaction en lecture seule.
+
+Pour les méthodes annotées avec ``@Transactional``, une transaction est démarrée à l’appel de cette méthode et est validée au retour de la méthode. Nous n’avons pas de code particulier à écrire pour cela. Spring Transaction utilise la programmation orientée aspect pour instrumenter notre code afin d’obtenir le comportement souhaité.
+
+
+## Gestion déclarative du rollback
+
+Par défaut, une transaction est invalidée (*rollback*) uniquement si la méthode transactionnelle échoue à cause d’une *unchecked* exception. Une *unchecked* exception est une exception qui n’est pas vérifiée par le compilateur (d’où son nom). Il s’agit des classes d’exception qui héritent de ``RuntimeException`` ou de ``Error``. Dans tous les autres cas, la transaction est validée (un *commit* est effectué).
+
+Donc si une méthode se termine par une checked exception, Spring Transaction considère la transaction comme valide et réalise un *commit*. Cela peut paraître étonnant comme comportement par défaut mais c’est malheureusement celui qui a été choisi.
+
+Si le comportement par défaut ne convient pas, il est possible d’utiliser l’attribut ``rollbackFor`` de l’annotation ``@Transactional`` pour ajouter une ou plusieurs classes d’exception qui devront produire un *rollback*.
+
+```java
+@Service
+public class UserService {
+
+  @Transactional(rollbackFor = UserExistsException.class)
+  public void saveUser(User user) throws UserExistsException, NoEmailException {
+    // ...
+  }
+}
+```
+
+Dans l’exemple ci-dessus, la méthode du service peut lever deux exceptions. ``UserExistsException`` entraînera un *rollback* comme spécifié dans l’annotation. Par contre, ``NoEmailException`` ne produira pas de *rollback* s’il s’agit d’une *checked* exception.
+
+> [!NOTICE]
+> Il existe également l’attribut ``noRollbackFor`` pour spécifier un ou des types d’exception pour lesquels on ne souhaite pas faire de rollback s’ils sont levés.
+>
+>La classe de l’exception donnée dans les attributs ``rollbackFor`` et ``noRollbackFor`` implique également toutes les classes qui héritent de cette exception. Ainsi si vous voulez être sûr qu’un rollback aura lieu pour n’importe quelle exception, vous pouvez écrire :
+>
+> 
+>```java
+>@Transactional(rollbackFor = Exception.class)
+>public void executerService() throws ServiceException {
+>  // ...
+>}
+>```
+> Comme toutes les exceptions héritent directement ou indirectement de la classe ``Exception``, la levée de n’importe quelle exception produira un rollback dans la méthode ``executerService``.
